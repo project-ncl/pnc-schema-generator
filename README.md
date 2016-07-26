@@ -11,6 +11,9 @@ This repository mostly uses code from:
 
 1. Build latest PNC source code
 2. Build this project. It will grab the latest model.jar from PNC
+```
+mvn clean install
+```
 3. Run:
 ```
 java -jar target/pnc-schema-generator.jar
