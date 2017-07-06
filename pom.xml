@@ -6,7 +6,7 @@
 
     <groupId>org.jboss.pnc</groupId>
     <artifactId>pnc-schema-generator</artifactId>
-    <version>0.10-SNAPSHOT</version>
+    <version>1.2.0-SNAPSHOT</version>
 
     <dependencies>
         <dependency>
