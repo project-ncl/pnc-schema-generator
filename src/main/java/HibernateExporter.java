@@ -1,106 +1,100 @@
 import java.io.File;
-import java.net.URL;
-import java.util.ArrayList;
-import java.util.EnumSet;
-import java.util.List;
-import java.util.Properties;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.PrintWriter;
 
-import org.hibernate.boot.MetadataSources;
-import org.hibernate.boot.registry.StandardServiceRegistryBuilder;
+import org.hibernate.cfg.AvailableSettings;
+import org.hibernate.cfg.Configuration;
 import org.hibernate.dialect.Dialect;
-import org.hibernate.tool.hbm2ddl.SchemaExport;
-import org.hibernate.tool.schema.TargetType;
+import org.hibernate.engine.jdbc.internal.FormatStyle;
+import org.hibernate.engine.jdbc.internal.Formatter;
+import com.google.common.reflect.ClassPath;
 
 public class HibernateExporter {
 
     private String dialect;
     private String entityPackage;
 
+    private boolean generateCreateQueries = true;
+    private boolean generateDropQueries = false;
+
+    private Configuration hibernateConfiguration;
+
     public HibernateExporter(String dialect, String entityPackage) {
         this.dialect = dialect;
         this.entityPackage = entityPackage;
+
+        hibernateConfiguration = createHibernateConfig();
     }
 
-    public void export(String exportFile) {
+    public void export(OutputStream out, boolean generateCreateQueries, boolean generateDropQueries) {
 
-        Properties properties = new Properties();
-        properties.setProperty("hibernate.dialect", dialect);
+        Dialect hibDialect = Dialect.getDialect(hibernateConfiguration.getProperties());
+        try (PrintWriter writer = new PrintWriter(out)) {
 
-        Dialect hibDialect = Dialect.getDialect(properties);
-
-        MetadataSources metadata = new MetadataSources(
-                new StandardServiceRegistryBuilder()
-                        .applySetting("hibernate.dialect", hibDialect)
-                        .build());
-
-        addClassestoMetadataSources(metadata);
-
-        SchemaExport export = new SchemaExport();
-
-        export.setDelimiter(";");
-        export.setFormat(true);
-        export.setOutputFile(exportFile);
-
-        export.execute(EnumSet.of(TargetType.SCRIPT), SchemaExport.Action.BOTH, metadata.buildMetadata());
-
+            if (generateCreateQueries) {
+                String[] createSQL = hibernateConfiguration.generateSchemaCreationScript(hibDialect);
+                write(writer, createSQL, FormatStyle.DDL.getFormatter());
+            }
+            if (generateDropQueries) {
+                String[] dropSQL = hibernateConfiguration.generateDropSchemaScript(hibDialect);
+                write(writer, dropSQL, FormatStyle.DDL.getFormatter());
+            }
+        }
     }
 
-    private void addClassestoMetadataSources(MetadataSources metadata) {
+    public void export(File exportFile) throws FileNotFoundException {
+
+        export(new FileOutputStream(exportFile), generateCreateQueries, generateDropQueries);
+    }
+
+    public void exportToConsole() {
+
+        export(System.out, generateCreateQueries, generateDropQueries);
+    }
+
+    private void write(PrintWriter writer, String[] lines, Formatter formatter) {
+
+        for (String string : lines)
+            writer.println(formatter.format(string) + ";");
+    }
+
+    private Configuration createHibernateConfig() {
+
+        hibernateConfiguration = new Configuration();
 
         try {
-            List<Class> clazz = getClasses(entityPackage);
-            for (Class a : clazz) {
-                metadata.addAnnotatedClass(a);
+            ClassPath classPath = ClassPath.from(this.getClass().getClassLoader());
+
+            for (ClassPath.ClassInfo classInfo : classPath.getTopLevelClasses(entityPackage)) {
+                Class<?> cl = classInfo.load();
+                hibernateConfiguration.addAnnotatedClass(cl);
+                System.out.println("Mapped = " + cl.getName());
             }
-        } catch(Exception e) {
-            e.printStackTrace();
+
+            hibernateConfiguration.setProperty(AvailableSettings.DIALECT, dialect);
+            return hibernateConfiguration;
+        } catch (IOException ex) {
+            ex.printStackTrace();
+            return null;
         }
     }
 
-    @SuppressWarnings("rawtypes")
-    private List<Class> getClasses(String packageName) throws Exception {
-        File directory = null;
-        try {
-            ClassLoader cld = getClassLoader();
-            URL resource = getResource(packageName, cld);
-            directory = new File(resource.getFile());
-        } catch (NullPointerException ex) {
-            throw new ClassNotFoundException(packageName + " (" + directory + ") does not appear to be a valid package");
-        }
-        return collectClasses(packageName, directory);
+    public boolean isGenerateDropQueries() {
+        return generateDropQueries;
     }
 
-    private ClassLoader getClassLoader() throws ClassNotFoundException {
-        ClassLoader cld = Thread.currentThread().getContextClassLoader();
-        if (cld == null) {
-            throw new ClassNotFoundException("Can't get class loader.");
-        }
-        return cld;
+    public void setGenerateDropQueries(boolean generateDropQueries) {
+        this.generateDropQueries = generateDropQueries;
     }
 
-    private URL getResource(String packageName, ClassLoader cld) throws ClassNotFoundException {
-        String path = packageName.replace('.', '/');
-        URL resource = cld.getResource(path);
-        if (resource == null) {
-            throw new ClassNotFoundException("No resource for " + path);
-        }
-        return resource;
+    public Configuration getHibernateConfiguration() {
+        return hibernateConfiguration;
     }
 
-    @SuppressWarnings("rawtypes")
-    private List<Class> collectClasses(String packageName, File directory) throws ClassNotFoundException {
-        List<Class> classes = new ArrayList<>();
-        if (directory.exists()) {
-            String[] files = directory.list();
-            for (String file : files) {
-                if (file.endsWith(".class")) {
-                    // removes the .class extension
-                    classes.add(Class.forName(packageName + '.' + file.substring(0, file.length() - 6)));
-                }
-            }
-        } else {
-            throw new ClassNotFoundException(packageName + " is not a valid package");
-        }
-        return classes;
+    public void setHibernateConfiguration(Configuration hibernateConfiguration) {
+        this.hibernateConfiguration = hibernateConfiguration;
     }
 }
